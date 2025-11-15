@@ -1,0 +1,33 @@
+{
+  "app_name": "Autobot",
+  "version": "2.0.0",
+  "phase": "Phase 2 - Target.com Automation",
+  "theme": {
+    "mode": "dark",
+    "colors": {
+      "primary": "#1a1625",
+      "secondary": "#231d2e",
+      "tertiary": "#2d2538",
+      "accent": "#8b5cf6",
+      "success": "#10b981",
+      "error": "#ef4444",
+      "warning": "#f59e0b",
+      "info": "#3b82f6"
+    }
+  },
+  "default_settings": {
+    "headless_mode": false,
+    "webhook_enabled": false,
+    "retry_limit": 3,
+    "price_tolerance": 10,
+    "monitor_delay": 5000,
+    "captcha_timeout": 120
+  },
+  "supported_sites": [
+    "Target"
+  ],
+  "database": {
+    "path": "autobot.db",
+    "tables": ["profiles", "proxies", "settings", "task_history"]
+  }
+}
