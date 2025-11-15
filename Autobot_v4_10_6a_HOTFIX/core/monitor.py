@@ -16,6 +16,7 @@ from core.image_cache import get_cache
 from core.ban_detector import get_ban_detector_pool
 from core.adaptive_monitor import get_speed_learner
 from core.smart_api_analyzer import SmartAPIAnalyzer  # V4.8: Smart API learning
+from core.enhanced_api_system import get_enhanced_api  # V5.0 (Autobot 2.0): Enhanced API with retries
 
 
 class Monitor:
@@ -84,6 +85,10 @@ class Monitor:
         # V4.8: Smart API learning (auto-learns API patterns during monitoring)
         self.api_analyzer = None  # Will be initialized on start
         self.api_learning_attempted = False  # Track if we already tried learning
+
+        # V5.0 (Autobot 2.0): Enhanced API system with intelligent retry
+        self.enhanced_api = None  # Will be initialized on start
+        self.api_stats = {'api_success': 0, 'html_fallback': 0}  # Track API vs HTML usage
         
     def start(self):
         """Start monitoring this product"""
@@ -107,8 +112,12 @@ class Monitor:
         # V4.10.6: Load existing patterns from database
         if self.db_manager:
             self.api_analyzer.load_patterns()
-        
+
         print(f"[MONITOR] {self.monitor_id}: Smart API learning enabled")
+
+        # V5.0 (Autobot 2.0): Initialize enhanced API system
+        self.enhanced_api = get_enhanced_api(self.db_manager)
+        print(f"[MONITOR] {self.monitor_id}: Autobot 2.0 Enhanced API active!")
         
         self.is_running = True
         self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
@@ -189,56 +198,68 @@ class Monitor:
             self._check_pokemon_center_stock()
             
     def _check_target_stock(self):
-        """Check Target.com stock - uses Smart API if pattern learned, falls back to HTML"""
+        """
+        Check Target.com stock - Autobot 2.0 Enhanced Version
+
+        Process:
+        1. Try Enhanced API with intelligent retry (tries ALL endpoints)
+        2. Only fall back to HTML if ALL API endpoints failed
+        3. Track success stats for analytics
+        """
         # Extract TCIN (Target product ID) from URL
         tcin_match = re.search(r'/A-(\d+)', self.product_url)
-        
+
         if not tcin_match:
             print(f"[MONITOR] {self.monitor_id}: Could not extract TCIN from URL")
             self._check_target_stock_html()
             return
-        
+
         tcin = tcin_match.group(1)
-        
-        # V4.8: Try Smart API first (if pattern learned)
-        if self.api_analyzer and self.api_analyzer.has_learned_pattern(self.site):
+
+        # V5.0 (Autobot 2.0): Try Enhanced API system first
+        if self.enhanced_api:
             try:
-                print(f"[MONITOR] {self.monitor_id}: Using learned API pattern")
-                api_result = self.api_analyzer.check_stock_fast(
-                    site=self.site,
-                    product_id=tcin,
-                    product_url=self.product_url
-                )
-                
+                print(f"[MONITOR] {self.monitor_id}: Using Autobot 2.0 Enhanced API...")
+                api_result = self.enhanced_api.check_stock(tcin, self.product_url)
+
                 if api_result and api_result.get('success'):
-                    # Successfully used learned API pattern
+                    # Successfully got data from API!
+                    old_stock_status = self.in_stock
+
                     self.product_name = api_result.get('name', 'Unknown')
-                    self.product_price = float(api_result.get('price', 0.0))
+                    self.product_price = api_result.get('price', 0.0)
+                    self.product_regular_price = api_result.get('regular_price', self.product_price)
                     self.in_stock = api_result.get('in_stock', False)
-                    
+
                     if api_result.get('image'):
                         self.product_image = api_result['image']
-                    
-                    print(f"[MONITOR] {self.monitor_id}: ✓ Smart API check complete ({self.product_name})")
+
+                    # Track success
+                    self.api_stats['api_success'] += 1
+
+                    print(f"[MONITOR] {self.monitor_id}: ✓ API Success! {self.product_name} - {'IN STOCK' if self.in_stock else 'OUT OF STOCK'}")
+
+                    # Trigger stock_found callback if stock changed
+                    if not old_stock_status and self.in_stock and self.callback:
+                        self.callback('stock_found', {
+                            'monitor_id': self.monitor_id,
+                            'product_url': self.product_url,
+                            'product_name': self.product_name,
+                            'product_price': self.product_price,
+                            'site': self.site
+                        })
+
                     return
+
                 else:
-                    print(f"[MONITOR] {self.monitor_id}: Learned pattern didn't work, re-learning...")
+                    print(f"[MONITOR] {self.monitor_id}: All API endpoints exhausted, falling back to HTML...")
+
             except Exception as e:
-                print(f"[MONITOR] {self.monitor_id}: Smart API failed: {e}, falling back...")
-        
-        # V4.8: Try to learn API pattern (but only once)
-        if not self.api_learning_attempted:
-            try:
-                print(f"[MONITOR] {self.monitor_id}: Attempting to learn API patterns...")
-                self._check_target_stock_with_learning(tcin)
-                self.api_learning_attempted = True  # Mark as attempted
-                return
-            except Exception as e:
-                print(f"[MONITOR] {self.monitor_id}: API learning failed: {e}")
-                self.api_learning_attempted = True  # Don't try again
-        
-        # Use HTML fallback (if learning already attempted or failed)
-        print(f"[MONITOR] {self.monitor_id}: Using HTML method")
+                print(f"[MONITOR] {self.monitor_id}: Enhanced API error: {e}")
+
+        # Fallback to HTML only if ALL API endpoints failed
+        print(f"[MONITOR] {self.monitor_id}: Using HTML fallback")
+        self.api_stats['html_fallback'] += 1
         self._check_target_stock_html()
     
     def _check_target_stock_with_learning(self, tcin: str):
