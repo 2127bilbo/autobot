@@ -41,3 +41,8 @@ Thumbs.db
 # Autobot specific
 autobot.db
 *.log
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
