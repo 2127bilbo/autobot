@@ -17,6 +17,7 @@ from core.ban_detector import get_ban_detector_pool
 from core.adaptive_monitor import get_speed_learner
 from core.smart_api_analyzer import SmartAPIAnalyzer  # V4.8: Smart API learning
 from core.enhanced_api_system import get_enhanced_api  # V5.0 (Autobot 2.0): Enhanced API with retries
+from core.hybrid_checker import get_hybrid_checker  # V5.0.1 (Autobot 2.0.1): Hybrid HTML/API checker
 
 
 class Monitor:
@@ -89,6 +90,9 @@ class Monitor:
         # V5.0 (Autobot 2.0): Enhanced API system with intelligent retry
         self.enhanced_api = None  # Will be initialized on start
         self.api_stats = {'api_success': 0, 'html_fallback': 0}  # Track API vs HTML usage
+
+        # V5.0.1 (Autobot 2.0.1): Hybrid HTML/API checker (adapts to API changes)
+        self.hybrid_checker = None  # Will be initialized on start
         
     def start(self):
         """Start monitoring this product"""
@@ -118,6 +122,10 @@ class Monitor:
         # V5.0 (Autobot 2.0): Initialize enhanced API system
         self.enhanced_api = get_enhanced_api(self.db_manager)
         print(f"[MONITOR] {self.monitor_id}: Autobot 2.0 Enhanced API active!")
+
+        # V5.0.1 (Autobot 2.0.1): Initialize hybrid checker (adapts to API changes)
+        self.hybrid_checker = get_hybrid_checker()
+        print(f"[MONITOR] {self.monitor_id}: Hybrid HTML/API checker ready!")
         
         self.is_running = True
         self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
@@ -199,12 +207,12 @@ class Monitor:
             
     def _check_target_stock(self):
         """
-        Check Target.com stock - Autobot 2.0 Enhanced Version
+        Check Target.com stock - Autobot 2.0.1 Hybrid Version
 
-        Process:
-        1. Try Enhanced API with intelligent retry (tries ALL endpoints)
-        2. Only fall back to HTML if ALL API endpoints failed
-        3. Track success stats for analytics
+        Process (Updated for Target API changes):
+        1. Try Hybrid HTML checker (FAST BeautifulSoup parsing)
+        2. Falls back to old HTML method if needed
+        3. API discovery happens in background (for when APIs return)
         """
         # Extract TCIN (Target product ID) from URL
         tcin_match = re.search(r'/A-(\d+)', self.product_url)
@@ -216,28 +224,27 @@ class Monitor:
 
         tcin = tcin_match.group(1)
 
-        # V5.0 (Autobot 2.0): Try Enhanced API system first
-        if self.enhanced_api:
+        # V5.0.1 (Autobot 2.0.1): Try Hybrid HTML checker FIRST (Target APIs deprecated)
+        if self.hybrid_checker:
             try:
-                print(f"[MONITOR] {self.monitor_id}: Using Autobot 2.0 Enhanced API...")
-                api_result = self.enhanced_api.check_stock(tcin, self.product_url)
+                print(f"[MONITOR] {self.monitor_id}: Using Hybrid HTML checker...")
+                result = self.hybrid_checker.check_stock_fast_html(self.product_url, tcin)
 
-                if api_result and api_result.get('success'):
-                    # Successfully got data from API!
+                if result and result.get('success'):
+                    # Successfully got data!
                     old_stock_status = self.in_stock
 
-                    self.product_name = api_result.get('name', 'Unknown')
-                    self.product_price = api_result.get('price', 0.0)
-                    self.product_regular_price = api_result.get('regular_price', self.product_price)
-                    self.in_stock = api_result.get('in_stock', False)
+                    self.product_name = result.get('name', 'Unknown')
+                    self.product_price = result.get('price', 0.0)
+                    self.product_regular_price = result.get('regular_price', self.product_price)
+                    self.in_stock = result.get('in_stock', False)
 
-                    if api_result.get('image'):
-                        self.product_image = api_result['image']
+                    if result.get('image'):
+                        self.product_image = result['image']
 
                     # Track success
-                    self.api_stats['api_success'] += 1
-
-                    print(f"[MONITOR] {self.monitor_id}: ✓ API Success! {self.product_name} - {'IN STOCK' if self.in_stock else 'OUT OF STOCK'}")
+                    source = result.get('source', 'hybrid')
+                    print(f"[MONITOR] {self.monitor_id}: ✓ Success ({source})! {self.product_name} - {'IN STOCK' if self.in_stock else 'OUT OF STOCK'}")
 
                     # Trigger stock_found callback if stock changed
                     if not old_stock_status and self.in_stock and self.callback:
@@ -252,14 +259,13 @@ class Monitor:
                     return
 
                 else:
-                    print(f"[MONITOR] {self.monitor_id}: All API endpoints exhausted, falling back to HTML...")
+                    print(f"[MONITOR] {self.monitor_id}: Hybrid checker failed, trying fallback...")
 
             except Exception as e:
-                print(f"[MONITOR] {self.monitor_id}: Enhanced API error: {e}")
+                print(f"[MONITOR] {self.monitor_id}: Hybrid checker error: {e}")
 
-        # Fallback to HTML only if ALL API endpoints failed
-        print(f"[MONITOR] {self.monitor_id}: Using HTML fallback")
-        self.api_stats['html_fallback'] += 1
+        # Fallback to old HTML method if hybrid failed
+        print(f"[MONITOR] {self.monitor_id}: Using legacy HTML fallback")
         self._check_target_stock_html()
     
     def _check_target_stock_with_learning(self, tcin: str):
