@@ -1,0 +1,11 @@
+# Archives
+*.zip
+*.tar.gz
+*.rar
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Databases
+*.db
